@@ -74,7 +74,8 @@ public final class ConfigParser {
         String jobContent = getJobContent(path);
         Configuration config = Configuration.from(jobContent);
 
-        return SecretUtil.decryptSecretKey(config);
+        config = SecretUtil.decryptSecretKey(config);
+        return SecretUtil.decryptEncryptedPasswords(config);
     }
 
     private static String getJobContent(String jobResource) {

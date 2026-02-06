@@ -34,6 +34,8 @@ import java.util.Properties;
  */
 public class SecretUtil {
     private static Properties properties;
+    private static final String PASSWORD_ENCRYPT_PREFIX = "ENC(";
+    private static final String PASSWORD_ENCRYPT_SUFFIX = ")";
 
     //RSA Key：keyVersion   value:left:privateKey, right:publicKey, middle: type
     //DESede Key: keyVersion   value:left:keyContent, right:keyContent, middle: type
@@ -373,6 +375,60 @@ public class SecretUtil {
         }
 
         return config;
+    }
+
+    public static Configuration decryptEncryptedPasswords(Configuration config) {
+        String keyVersion = config
+                .getString(CoreConstant.DATAX_JOB_SETTING_KEYVERSION);
+        if (StringUtils.isBlank(keyVersion)) {
+            return config;
+        }
+
+        Map<String, Triple<String, String, String>> versionKeyMap = getPrivateKeyMap();
+        if (null == versionKeyMap.get(keyVersion)) {
+            throw DataXException.asDataXException(
+                    FrameworkErrorCode.SECRET_ERROR,
+                    String.format("DataX配置的密钥版本为[%s]，但在系统中没有配置，任务密钥配置错误，不存在您配置的密钥版本", keyVersion));
+        }
+        String decryptKey = versionKeyMap.get(keyVersion).getLeft();
+        String method = versionKeyMap.get(keyVersion).getMiddle();
+        if (StringUtils.isBlank(decryptKey)) {
+            throw DataXException.asDataXException(
+                    FrameworkErrorCode.SECRET_ERROR,
+                    String.format("DataX配置的密钥版本为[%s]，但在系统中没有配置，可能是任务密钥配置错误，也可能是系统维护问题", keyVersion));
+        }
+
+        for (String key : config.getKeys()) {
+            int lastPathIndex = key.lastIndexOf(".") + 1;
+            String lastPathKey = key.substring(lastPathIndex);
+            if (!StringUtils.equalsIgnoreCase(lastPathKey, "password")) {
+                continue;
+            }
+            Object value = config.get(key);
+            if (!(value instanceof String)) {
+                continue;
+            }
+            String password = ((String) value).trim();
+            if (!isEncryptedPassword(password)) {
+                continue;
+            }
+            String cipherText = password.substring(PASSWORD_ENCRYPT_PREFIX.length(),
+                    password.length() - PASSWORD_ENCRYPT_SUFFIX.length());
+            String decrypted = SecretUtil.decrypt(cipherText, decryptKey, method);
+            config.set(key, decrypted);
+        }
+
+        return config;
+    }
+
+    private static boolean isEncryptedPassword(String password) {
+        if (StringUtils.isBlank(password)) {
+            return false;
+        }
+        if (!StringUtils.endsWith(password, PASSWORD_ENCRYPT_SUFFIX)) {
+            return false;
+        }
+        return StringUtils.startsWithIgnoreCase(password, PASSWORD_ENCRYPT_PREFIX);
     }
 
     private static synchronized Map<String, Triple<String, String, String>> getPrivateKeyMap() {
